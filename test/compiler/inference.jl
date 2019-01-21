@@ -2206,3 +2206,11 @@ _rttf_test(::Int128) = 0
 _call_rttf_test() = Core.Compiler.return_type(_rttf_test, Tuple{Any})
 @test Core.Compiler.return_type(_rttf_test, Tuple{Any}) === Int
 @test _call_rttf_test() === Int
+
+# Test PartialStruct for closures
+function foo(b)
+    a = 1
+    f = ()->(println(b); Val(a))
+    f()
+end
+@test @inferred(foo(2)) == Val(1)

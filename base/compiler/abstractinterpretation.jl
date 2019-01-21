@@ -183,7 +183,7 @@ function abstract_call_method_with_const_args(@nospecialize(rettype), @nospecial
             # in this case, see if all of the arguments are constants
             for a in argtypes
                 a = widenconditional(a)
-                if !isa(a, Const) && !isconstType(a)
+                if !isa(a, Const) && !isconstType(a) && !isa(a, PartialStruct)
                     return Any
                 end
             end
@@ -378,7 +378,7 @@ end
 # Union of Tuples of the same length is converted to Tuple of Unions.
 # returns an array of types
 function precise_container_type(@nospecialize(typ), vtypes::VarTable, sv::InferenceState)
-    if isa(typ, PartialTuple)
+    if isa(typ, PartialStruct) && typ.typ.name === Tuple.name
         return typ.fields
     end
 
@@ -900,26 +900,32 @@ function abstract_eval(@nospecialize(e), vtypes::VarTable, sv::InferenceState)
         t = instanceof_tfunc(abstract_eval(e.args[1], vtypes, sv))[1]
         if isconcretetype(t) && !t.mutable
             args = Vector{Any}(undef, length(e.args)-1)
-            isconst = true
+            ats = Vector{Any}(undef, length(e.args)-1)
+            anyconst = false
+            allconst = true
             for i = 2:length(e.args)
                 at = abstract_eval(e.args[i], vtypes, sv)
+                ats[i-1] = at
                 if at === Bottom
                     t = Bottom
-                    isconst = false
+                    allconst = anyconst = false
                     break
                 elseif at isa Const
                     if !(at.val isa fieldtype(t, i - 1))
                         t = Bottom
-                        isconst = false
+                        allconst = anyconst = false
                         break
                     end
+                    anyconst = true
                     args[i-1] = at.val
                 else
-                    isconst = false
+                    allconst = false
                 end
             end
-            if isconst
+            if allconst
                 t = Const(ccall(:jl_new_structv, Any, (Any, Ptr{Cvoid}, UInt32), t, args, length(args)))
+            elseif anyconst
+                t = PartialStruct(t, ats)
             end
         end
     elseif e.head === :&
@@ -1083,7 +1089,7 @@ function typeinf_local(frame::InferenceState)
             elseif hd === :return
                 pc´ = n + 1
                 rt = widenconditional(abstract_eval(stmt.args[1], s[pc], frame))
-                if !isa(rt, Const) && !isa(rt, Type) && !isa(rt, PartialTuple)
+                if !isa(rt, Const) && !isa(rt, Type) && !isa(rt, PartialStruct)
                     # only propagate information we know we can store
                     # and is valid inter-procedurally
                     rt = widenconst(rt)
